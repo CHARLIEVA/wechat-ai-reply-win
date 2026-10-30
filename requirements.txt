@@ -1,0 +1,6 @@
+# Python dependencies / Python 依赖
+# wxauto4 ships Windows wheels only (Python 3.9-3.13 x64). Its author declares no license; it is NOT bundled here.
+# wxauto4 只提供 Windows 轮子（Python 3.9-3.13 x64）。作者未声明许可证，本仓库不附带其代码。
+wxauto4==41.1.7
+httpx==0.27.2
+python-dotenv==1.0.1
