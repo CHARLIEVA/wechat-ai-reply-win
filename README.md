@@ -27,6 +27,7 @@ An AI auto-reply bot for personal WeChat that runs on a Windows PC. It uses [wxa
 - [Quick start](#quick-start)
 - [Configuration](#configuration)
 - [Persona, knowledge, memory and proactive chat](#persona-knowledge-memory-and-proactive-chat)
+- [Running reliably](#running-reliably-no-old-message-replies-watchdog-window-quote-commands)
 - [FAQ](#faq)
 - [Limitations and risks](#limitations-and-risks)
 - [Legacy engine: Wechaty + puppet-xp](#legacy-engine-wechaty--puppet-xp)
@@ -49,6 +50,10 @@ An AI auto-reply bot for personal WeChat that runs on a Windows PC. It uses [wxa
 | Long-term memory (optional) | After a number of new exchanges, the AI summarizes them into that chat's `memory.md` |
 | Proactive chat (experimental) | Listed groups only; says one line when a group goes quiet, with hours, cooldown, daily cap and probability limits |
 | Bilingual | One `LANGUAGE` switch for persona and memory prompt language |
+| No old-message replies on startup | Messages and unread badges from before startup are marked seen; a restart never re-answers old questions |
+| Watchdog | Restarts the bot when its heartbeat goes stale or it exits, with cooldown/backoff; never restarts while WeChat is logged out |
+| Quiet window | WeChat stays small and at the back; it is activated only briefly while sending |
+| Quote commands (optional) | `/btc` shows 15m / 4h / 1d change; `/AAPL`, `/600519` for stocks |
 | Scrubbed storage | Phone, ID and card numbers and keys are masked before saving |
 
 ## How it works
@@ -152,6 +157,48 @@ With `MEMORY_ENABLED=true`, after every `MEMORY_EVERY_N` new exchanges in a chat
 
 Off by default. Set `PROACTIVE_ENABLED=true` and list **exact group names** in `PROACTIVE_CHATS`. Every `PROACTIVE_CHECK_MIN` minutes the bot checks each group and says one line only if all of these hold: inside `PROACTIVE_HOURS`; someone spoke in the last 24 hours; quiet for `PROACTIVE_QUIET_MIN` minutes; at least `PROACTIVE_COOLDOWN_MIN` minutes since its last proactive line and under `PROACTIVE_MAX_PER_DAY` today; and a `PROACTIVE_PROB` roll succeeds. "Quiet" is based only on messages seen while the bot is running.
 
+## Running reliably: no old-message replies, watchdog, window, quote commands
+
+### No replies to old messages on startup
+
+At startup the bot snapshots the session list. Anything that was already there (messages or unread badges) counts as old: the first time such a chat is opened, all its messages are marked seen and **nothing is replied to**. Only messages that arrive after startup can trigger a reply, so a restart never re-answers old group questions.
+
+### Watchdog (auto-restart when the bot hangs)
+
+- `bot.py` writes a heartbeat file `logs/bot.heartbeat` (`HEARTBEAT_FILE`) on every poll.
+- `watchdog.ps1` checks every 30 s. If the heartbeat is older than `WD_STALE_SEC` seconds (default 300) or the bot process is gone, it restarts the bot through `run_bot.bat` with proxy variables cleared.
+- No restart storms: at least 300 s between restarts, doubling up to 1800 s if restarts don't help, reset after 30 minutes healthy.
+- If WeChat isn't running or looks logged out, it only logs; it does **not** restart or try to log in. Log in to WeChat yourself.
+- Single instance (named mutex). Log: `logs/watchdog.log`.
+
+Install (starts at Windows logon): right-click `install_watchdog.bat` → "Run as administrator". It creates the scheduled task `WechatAiReplyWinWatchdog` (on logon, interactive, highest privileges):
+
+```bat
+schtasks /Create /F /TN WechatAiReplyWinWatchdog /SC ONLOGON /RL HIGHEST /IT ^
+  /TR "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"C:\wechat-ai-reply-win\watchdog.ps1\""
+```
+
+- Pause: create an empty file `watchdog.disable` in the project folder; delete it to resume.
+- Remove: run `uninstall_watchdog.bat` (or `schtasks /End` + `schtasks /Delete /TN WechatAiReplyWinWatchdog`).
+- Change the hang threshold with a system environment variable `WD_STALE_SEC` (the task does not read `.env`).
+
+> With the watchdog installed, don't also double-click `start.bat`, or two bots will run.
+
+### WeChat window stays in the background
+
+wxauto4 brings WeChat to the front on every UI read. Reads no longer activate the window; it is only activated briefly while sending. At startup WeChat is resized to `WX_WIN_W`×`WX_WIN_H` (default 1000×760) and moved to the bottom of the window stack. wxauto4 can't attach to a **minimized** WeChat, so a small window at the back is used instead. Set `WX_WINDOW_QUIET=false` to turn this off.
+
+### Quote commands (optional)
+
+With `STOCK_CMD_ENABLED=true`, `/btc`, `/eth`, `/AAPL`, `/600519`, `/00700` get an instant quote:
+
+- Crypto: Binance public API, price plus **15m / 4h / 1d** change;
+- Stocks: Tencent quotes, price plus 15-minute and daily change; optional `FINNHUB_API_KEY` for US stocks.
+
+### Proxies
+
+Requests **ignore** system proxies (`HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY`), and `start.bat` / `run_bot.bat` clear them before launch. A leftover `ALL_PROXY` once made every Binance request time out. If Finnhub needs a proxy, set `FINNHUB_PROXY`.
+
 ## FAQ
 
 <details>
@@ -239,12 +286,17 @@ wechat-ai-reply-win/
 │   ├── config.py        loads .env and the persona
 │   ├── ai.py            OpenAI-compatible client
 │   ├── kb.py            per-chat knowledge, dedup, long-term memory
-│   └── proactive.py     proactive chat
+│   ├── proactive.py     proactive chat
+│   ├── stock.py         /btc /AAPL quote commands (optional)
+│   └── window.py        keeps WeChat small and at the back
 ├── persona/             default personas (zh-CN / en)
 ├── kb/                  local knowledge base (runtime, not committed)
 ├── .env.example         config template (bilingual comments)
 ├── requirements.txt
 ├── install.bat / start.bat
+├── run_bot.bat          unattended start (used by the watchdog)
+├── watchdog.ps1         watchdog
+├── install_watchdog.bat / uninstall_watchdog.bat
 ├── alt/wechaty-puppet-xp/   legacy Node engine
 └── README.md / README.zh-CN.md / SECURITY.md / LICENSE
 ```

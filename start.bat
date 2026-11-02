@@ -6,6 +6,14 @@ REM ============================================================
 setlocal
 cd /d "%~dp0"
 set PYTHONIOENCODING=utf-8
+REM Do not inherit system proxies (an inherited ALL_PROXY made Binance/AI requests time out).
+REM 不继承系统代理（继承的 ALL_PROXY 曾导致行情/AI 请求超时）。需要代理请用 FINNHUB_PROXY 等专用变量。
+set HTTP_PROXY=
+set HTTPS_PROXY=
+set ALL_PROXY=
+set http_proxy=
+set https_proxy=
+set all_proxy=
 where py >nul 2>&1
 if errorlevel 1 (
   echo [ERROR] Python not found. Run install.bat first.

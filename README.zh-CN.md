@@ -27,6 +27,7 @@
 - [快速开始](#快速开始)
 - [配置说明](#配置说明)
 - [人设、知识库、记忆与主动聊天](#人设知识库记忆与主动聊天)
+- [稳定运行：启动不回旧消息、看门狗、窗口、行情命令](#稳定运行启动不回旧消息看门狗窗口行情命令)
 - [常见问题](#常见问题)
 - [限制与风险](#限制与风险)
 - [旧版引擎：Wechaty + puppet-xp](#旧版引擎wechaty--puppet-xp)
@@ -49,6 +50,10 @@
 | 长期记忆（可选） | 每个会话新增一定数量问答后，由 AI 整理成该会话的 `memory.md` |
 | 主动聊天（实验性） | 只对指定群生效，群里安静时偶尔说一句，有时段、冷却、每日上限、概率限制 |
 | 中英双语 | `LANGUAGE` 一个开关切换人设和记忆提示词语言 |
+| 启动不回旧消息 | 启动前已有的消息和未读一律标记已读，重启不会把历史问题再答一遍 |
+| 看门狗 | 心跳超时或进程消失自动重启，带冷却退避；微信掉线时不重启 |
+| 窗口不抢前台 | 微信保持小窗并放到最底层，只在发送时短暂激活 |
+| 行情命令（可选） | `/btc` 给出 15分钟 / 4小时 / 1日 涨跌，`/AAPL`、`/600519` 查股票 |
 | 存储脱敏 | 写入知识库前遮掉手机号、身份证号、银行卡号和 Key |
 
 ## 工作原理
@@ -152,6 +157,48 @@ kb/
 
 默认关闭。设置 `PROACTIVE_ENABLED=true`，并在 `PROACTIVE_CHATS` 写上**完整群名**后，机器人每 `PROACTIVE_CHECK_MIN` 分钟检查一次，一个群要同时满足以下条件才会说一句：在 `PROACTIVE_HOURS` 时段内；最近 24 小时有人说过话；已安静 `PROACTIVE_QUIET_MIN` 分钟；距上次主动发言超过 `PROACTIVE_COOLDOWN_MIN` 分钟且当天未达 `PROACTIVE_MAX_PER_DAY` 次；通过 `PROACTIVE_PROB` 概率。“安静多久”只根据机器人运行期间看到的消息计算。
 
+## 稳定运行：启动不回旧消息、看门狗、窗口、行情命令
+
+### 启动时不回旧消息
+
+启动时先给会话列表拍一个快照。启动前就有的消息和未读角标都当作旧消息：第一次打开这些会话时全部标记已读，**不回复**。只有启动后新出现的消息才会触发回复，所以重启不会把群里的历史问题再答一遍。
+
+### 看门狗（自动重启卡死的机器人）
+
+- `bot.py` 每轮轮询都会写心跳文件 `logs/bot.heartbeat`（`HEARTBEAT_FILE`）。
+- `watchdog.ps1` 每 30 秒检查一次：心跳超过 `WD_STALE_SEC` 秒（默认 300）没更新，或机器人进程不在，就通过 `run_bot.bat` 重启（会先清空代理变量）。
+- 防止反复重启：两次重启至少间隔 300 秒，连续无效则翻倍，最多 1800 秒；正常运行 30 分钟后恢复。
+- 微信没运行或疑似退出登录时，只写日志、**不重启、不尝试登录**，需要你手动登录微信。
+- 单实例（命名互斥锁），日志在 `logs/watchdog.log`。
+
+安装（登录 Windows 时自动启动）：右键 `install_watchdog.bat` →“以管理员身份运行”。它会创建计划任务 `WechatAiReplyWinWatchdog`（登录时触发、交互式、最高权限）：
+
+```bat
+schtasks /Create /F /TN WechatAiReplyWinWatchdog /SC ONLOGON /RL HIGHEST /IT ^
+  /TR "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"C:\wechat-ai-reply-win\watchdog.ps1\""
+```
+
+- 临时暂停：在项目目录新建空文件 `watchdog.disable`，删掉即恢复。
+- 卸载：运行 `uninstall_watchdog.bat`（或 `schtasks /End` + `schtasks /Delete /TN WechatAiReplyWinWatchdog`）。
+- 想改卡死阈值：设置系统环境变量 `WD_STALE_SEC`（计划任务不读 `.env`）。
+
+> 用了看门狗就不要再手动双击 `start.bat`，否则会同时跑两个机器人。
+
+### 微信窗口不抢前台
+
+wxauto4 每次读取界面都会把微信拉到最前面。现在读取时不再激活窗口，只在真正发送消息时短暂激活；启动时把微信缩成 `WX_WIN_W`×`WX_WIN_H`（默认 1000×760）并放到所有窗口的最底层。wxauto4 无法连接**最小化**的微信，所以用“小窗 + 最底层”代替最小化。不需要可设 `WX_WINDOW_QUIET=false`。
+
+### 行情命令（可选）
+
+`STOCK_CMD_ENABLED=true` 后，群里发 `/btc`、`/eth`、`/AAPL`、`/600519`、`/00700`、`/英伟达` 会直接回复行情：
+
+- 加密货币：Binance 公共行情，显示现价和 **15分钟 / 4小时 / 1日** 涨跌；
+- 股票：腾讯行情，显示现价、15 分钟和当日涨跌；美股可选配 `FINNHUB_API_KEY`。
+
+### 代理
+
+所有请求都**不继承**系统代理（`HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY`），`start.bat` 和 `run_bot.bat` 启动前也会清空这些变量。系统里残留的 `ALL_PROXY` 曾导致 Binance 请求全部超时。确实需要代理访问 Finnhub 时，单独设置 `FINNHUB_PROXY`。
+
 ## 常见问题
 
 <details>
@@ -239,12 +286,17 @@ wechat-ai-reply-win/
 │   ├── config.py        读取 .env、加载人设
 │   ├── ai.py            OpenAI 兼容接口客户端
 │   ├── kb.py            会话隔离的知识库、去重、长期记忆
-│   └── proactive.py     主动聊天
+│   ├── proactive.py     主动聊天
+│   ├── stock.py         /btc /AAPL 行情命令（可选）
+│   └── window.py        微信窗口小窗置底、不抢前台
 ├── persona/             默认人设（中文 / 英文）
 ├── kb/                  本地知识库（运行时生成，不提交）
 ├── .env.example         配置模板（中英文注释）
 ├── requirements.txt
 ├── install.bat / start.bat
+├── run_bot.bat          无人值守启动（看门狗使用）
+├── watchdog.ps1         看门狗
+├── install_watchdog.bat / uninstall_watchdog.bat
 ├── alt/wechaty-puppet-xp/   旧版 Node 引擎
 └── README.md / README.zh-CN.md / SECURITY.md / LICENSE
 ```

@@ -33,3 +33,12 @@ rooms.txt
 *.tgz
 .DS_Store
 Thumbs.db
+
+# runtime state (heartbeat / lock / watchdog)
+*.heartbeat
+*.lock
+watchdog.disable
+*.prev
+*.prev-*
+stock_aliases.json
+secrets/

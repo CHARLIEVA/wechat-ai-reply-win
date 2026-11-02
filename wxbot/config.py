@@ -66,6 +66,10 @@ PROACTIVE_MAX_PER_DAY = int(_num("PROACTIVE_MAX_PER_DAY", 3))
 PROACTIVE_PROB = _num("PROACTIVE_PROB", 0.3)
 PROACTIVE_CHECK_MIN = _num("PROACTIVE_CHECK_MIN", 10)
 
+# Reliability / 可靠性
+HEARTBEAT_FILE = os.path.join(ROOT, _env("HEARTBEAT_FILE", "logs/bot.heartbeat"))
+STOCK_CMD_ENABLED = _bool("STOCK_CMD_ENABLED", False)
+
 KB_DIR = os.path.join(ROOT, _env("KB_DIR", "kb"))
 LOG_FILE = os.path.join(ROOT, _env("LOG_FILE", "logs/bot.log"))
 
